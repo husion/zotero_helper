@@ -82,6 +82,7 @@ function checkForAttachments() {
         logPageState('unsupported-route', {
             href: window.location.href
         });
+        removeExistingButtons();
         return;
     }
 
@@ -114,7 +115,7 @@ function checkForAttachments() {
         });
         const itemKey = attachmentKey;
         // Clean up any existing buttons (e.g. from previous navigation)
-        removeExistingButtons();
+        removeExistingButtons(itemKey);
         
         // Check if file exists before injecting -> REMOVED as per user request
         // checkAndInject(itemKey);
@@ -128,19 +129,30 @@ function checkForAttachments() {
     }
 }
 
-function removeExistingButtons() {
+function getButtonId(itemKey) {
+    return `zotero-helper-btn-${itemKey}`;
+}
+
+function removeExistingButtons(keepItemKey = null) {
     const existing = document.querySelectorAll('[id^="zotero-helper-btn-"]');
-    if (existing.length > 0) {
-        Logger.info(`Removing ${existing.length} existing Zotero Helper button(s)`);
+    let removedCount = 0;
+    existing.forEach(btn => {
+        if (keepItemKey && btn.id === getButtonId(keepItemKey)) {
+            return;
+        }
+        btn.remove();
+        removedCount += 1;
+    });
+    if (removedCount > 0) {
+        Logger.info(`Removing ${removedCount} existing Zotero Helper button(s)`);
     }
-    existing.forEach(btn => btn.remove());
 }
 
 
 
 function injectDownloadButtons(itemKey) {
     // Prevent double injection
-    if (document.getElementById(`zotero-helper-btn-${itemKey}`)) {
+    if (document.getElementById(getButtonId(itemKey))) {
         Logger.info(`Button already exists for attachment ${itemKey}`);
         return;
     }
@@ -152,7 +164,7 @@ function injectDownloadButtons(itemKey) {
     if (container) {
         Logger.info(`Injecting download button for attachment ${itemKey}`);
         const btn = document.createElement('button');
-        btn.id = `zotero-helper-btn-${itemKey}`;
+        btn.id = getButtonId(itemKey);
         btn.innerText = 'Download from WebDAV';
         btn.style.cssText = `
             position: fixed;
