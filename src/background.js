@@ -3,9 +3,42 @@ import { WebDAVClient } from './webdav_client.js';
 import './lib/jszip.min.js';
 
 const JSZip = self.JSZip;
+const loggerReady = initializeDebugLogging();
+
+function summarizeSettings(settings) {
+    return {
+        webdavUrl: settings.webdavUrl || '',
+        username: settings.username || '',
+        passwordConfigured: Boolean(settings.password),
+        debugEnabled: Boolean(settings.debugEnabled)
+    };
+}
+
+async function initializeDebugLogging() {
+    if (!chrome?.storage?.local) return;
+    const settings = await chrome.storage.local.get({ debugEnabled: false });
+    Logger.setDebugEnabled(settings.debugEnabled);
+
+    if (chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName === 'local' && changes.debugEnabled) {
+                Logger.setDebugEnabled(changes.debugEnabled.newValue);
+                Logger.info('Background debug logging updated', {
+                    debugEnabled: Boolean(changes.debugEnabled.newValue)
+                });
+            }
+        });
+    }
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'DOWNLOAD_ITEM') {
+        loggerReady.then(() => {
+            Logger.info('Received DOWNLOAD_ITEM request', {
+                payload: message.payload,
+                senderUrl: sender?.url || ''
+            });
+        });
         handleDownload(message.payload).then((downloadId) => {
             sendResponse({ success: true, downloadId: downloadId });
         }).catch(err => {
@@ -19,6 +52,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Auto-open file after download
 chrome.downloads.onChanged.addListener((delta) => {
     if (delta.state && delta.state.current === 'complete') {
+        Logger.info(`Opening completed Chrome download: ${delta.id}`);
         // We could track specific download IDs if needed, but for now open all completes from this extension
         // Better to check if it matches our downloadId if possible, but handleDownload returns it.
         // For simplicity, we can rely on the user intent 'open after download'.
@@ -27,11 +61,13 @@ chrome.downloads.onChanged.addListener((delta) => {
 });
 
 async function handleDownload(item) {
+    await loggerReady;
     const { key, filename } = item;
     Logger.info(`Starting download for item: ${key} (${filename})`);
 
     // 1. Get Settings
-    const settings = await chrome.storage.local.get(['webdavUrl', 'username', 'password']);
+    const settings = await chrome.storage.local.get(['webdavUrl', 'username', 'password', 'debugEnabled']);
+    Logger.info('Loaded WebDAV settings summary', summarizeSettings(settings));
     if (!settings.webdavUrl || !settings.username || !settings.password) {
         throw new Error('WebDAV settings not configured.');
     }
@@ -43,6 +79,7 @@ async function handleDownload(item) {
     let zipData;
     
     try {
+        Logger.info(`Attempting WebDAV ZIP fetch: ${zipPath}`);
         zipData = await client.get(zipPath);
     } catch (e) {
         // If 404, try adding 'zotero/' prefix in case user configured root WebDAV URL
@@ -50,6 +87,7 @@ async function handleDownload(item) {
             Logger.info('404 received, trying zotero/ prefix...');
             zipPath = `zotero/${key}.zip`;
             try {
+                Logger.info(`Attempting WebDAV ZIP fetch: ${zipPath}`);
                 zipData = await client.get(zipPath);
             } catch (retryErr) {
                 // If it fails again, check if it was 404 or something else
@@ -100,6 +138,7 @@ async function handleDownload(item) {
         throw new Error('File not found in ZIP.');
     }
 
+    Logger.info(`Selected file from ZIP: ${targetFile.name || filename}`);
     const blob = await targetFile.async('blob');
 
     // 5. Download
@@ -111,11 +150,14 @@ async function handleDownload(item) {
     });
 
     try {
-        return await chrome.downloads.download({
+        Logger.info(`Starting Chrome download for ${filename}`);
+        const downloadId = await chrome.downloads.download({
             url: base64data,
             filename: filename,
             saveAs: true
         });
+        Logger.info(`Chrome download started for ${filename} with id ${downloadId}`);
+        return downloadId;
     } catch (e) {
         Logger.error('Chrome download failed', e);
         throw e;

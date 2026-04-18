@@ -3,7 +3,18 @@
  */
 
 export class Logger {
+    static debugEnabled = false;
+
+    static setDebugEnabled(enabled) {
+        Logger.debugEnabled = Boolean(enabled);
+    }
+
+    static isDebugEnabled() {
+        return Logger.debugEnabled;
+    }
+
     static info(message, ...args) {
+        if (!Logger.debugEnabled) return;
         console.log(`[ZoteroHelper] ${message}`, ...args);
     }
 

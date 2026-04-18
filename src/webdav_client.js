@@ -28,6 +28,7 @@ export class WebDAVClient {
             throw new Error(`WebDAV PROPFIND failed: ${response.status} ${response.statusText}`);
         }
 
+        Logger.info(`WebDAV PROPFIND succeeded: ${response.status} ${response.statusText}`);
         return await response.text();
     }
 
@@ -49,6 +50,7 @@ export class WebDAVClient {
             throw new Error(`WebDAV GET failed: ${response.status} ${response.statusText}`);
         }
 
+        Logger.info(`WebDAV GET succeeded: ${response.status} ${response.statusText}`);
         return await response.arrayBuffer();
     }
 }

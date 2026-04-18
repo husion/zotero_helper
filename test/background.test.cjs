@@ -58,6 +58,7 @@ function createBackgroundHarness({
     deps: {
       './utils.js': {
         Logger: {
+          setDebugEnabled() {},
           info() {},
           error() {}
         }

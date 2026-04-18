@@ -1,6 +1,13 @@
 // Logger utility inlined for Content Script (no module support)
 class Logger {
+    static debugEnabled = false;
+
+    static setDebugEnabled(enabled) {
+        Logger.debugEnabled = Boolean(enabled);
+    }
+
     static info(message, ...args) {
+        if (!Logger.debugEnabled) return;
         console.log(`[ZoteroHelper] ${message}`, ...args);
     }
 
@@ -9,14 +16,54 @@ class Logger {
     }
 }
 
-Logger.info('Content script loaded');
-
 // Configuration
 const RECHECK_INTERVAL = 1000;
-// Matches both /web-library/ and /<user>/items/
-const ZOTERO_URL_PATTERN = /^https:\/\/www\.zotero\.org\/(web-library|[\w]+\/items)/;
+// Matches web-library and library routes that contain /items/, including collection paths.
+const ZOTERO_URL_PATTERN = /^https:\/\/www\.zotero\.org\/(?:web-library|[^?#]*\/items(?:\/|$))/;
+let lastLoggedPageState = null;
+
+function initializeDebugLogging() {
+    if (!chrome?.storage?.local) return;
+
+    chrome.storage.local.get({ debugEnabled: false }, (items) => {
+        Logger.setDebugEnabled(items.debugEnabled);
+        Logger.info('Content script loaded');
+        Logger.info('Content debug logging configured', {
+            debugEnabled: Boolean(items.debugEnabled)
+        });
+        checkForAttachments();
+    });
+
+    if (chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName === 'local' && changes.debugEnabled) {
+                Logger.setDebugEnabled(changes.debugEnabled.newValue);
+                Logger.info('Content debug logging updated', {
+                    debugEnabled: Boolean(changes.debugEnabled.newValue)
+                });
+            }
+        });
+    }
+}
+
+function isSupportedZoteroPage(url = window.location.href) {
+    return ZOTERO_URL_PATTERN.test(url);
+}
+
+function getAttachmentKey(pathname = window.location.pathname) {
+    const attachmentMatch = pathname.match(/\/attachment\/([A-Z0-9]+)(?:\/|$)/);
+    return attachmentMatch ? attachmentMatch[1] : null;
+}
+
+function logPageState(state, details = {}) {
+    const signature = JSON.stringify({ state, ...details });
+    if (signature === lastLoggedPageState) return;
+    lastLoggedPageState = signature;
+    Logger.info(`Page state: ${state}`, details);
+}
 
 function init() {
+    Logger.info('Initializing content script observers');
     // Ideally use MutationObserver, but for simplicity in MV3/SPA, polling + Observer is robust.
     const observer = new MutationObserver(handleMutations);
     observer.observe(document.body, { childList: true, subtree: true });
@@ -31,7 +78,12 @@ function handleMutations(mutations) {
 }
 
 function checkForAttachments() {
-    if (!ZOTERO_URL_PATTERN.test(window.location.href)) return;
+    if (!isSupportedZoteroPage(window.location.href)) {
+        logPageState('unsupported-route', {
+            href: window.location.href
+        });
+        return;
+    }
 
     // Selector for attachment items in Zotero Web Library
     // Note: Zotero classes might be obfuscated or standard.
@@ -53,13 +105,14 @@ function checkForAttachments() {
     // However, the user said "zotero.org/items/". 
     // IF the URL contains /items/, we are viewing an item.
 
-    const path = window.location.pathname; 
-    
-    // STRICT REQUIREMENT: Only show on attachment pages
-    const attachmentMatch = path.match(/attachment\/([A-Z0-9]+)/);
+    const attachmentKey = getAttachmentKey(window.location.pathname);
 
-    if (attachmentMatch) {
-        const itemKey = attachmentMatch[1];
+    if (attachmentKey) {
+        logPageState('attachment-page-detected', {
+            href: window.location.href,
+            attachmentKey
+        });
+        const itemKey = attachmentKey;
         // Clean up any existing buttons (e.g. from previous navigation)
         removeExistingButtons();
         
@@ -67,6 +120,9 @@ function checkForAttachments() {
         // checkAndInject(itemKey);
         injectDownloadButtons(itemKey);
     } else {
+        logPageState('supported-non-attachment-page', {
+            href: window.location.href
+        });
         // specific requirement: "best if switch item, remove button"
         removeExistingButtons();
     }
@@ -74,6 +130,9 @@ function checkForAttachments() {
 
 function removeExistingButtons() {
     const existing = document.querySelectorAll('[id^="zotero-helper-btn-"]');
+    if (existing.length > 0) {
+        Logger.info(`Removing ${existing.length} existing Zotero Helper button(s)`);
+    }
     existing.forEach(btn => btn.remove());
 }
 
@@ -81,13 +140,17 @@ function removeExistingButtons() {
 
 function injectDownloadButtons(itemKey) {
     // Prevent double injection
-    if (document.getElementById(`zotero-helper-btn-${itemKey}`)) return;
+    if (document.getElementById(`zotero-helper-btn-${itemKey}`)) {
+        Logger.info(`Button already exists for attachment ${itemKey}`);
+        return;
+    }
 
     // User requested to ONLY show the bottom right button.
     // We force appending to document.body and using fixed positioning.
     const container = document.body;
 
     if (container) {
+        Logger.info(`Injecting download button for attachment ${itemKey}`);
         const btn = document.createElement('button');
         btn.id = `zotero-helper-btn-${itemKey}`;
         btn.innerText = 'Download from WebDAV';
@@ -131,6 +194,8 @@ function injectDownloadButtons(itemKey) {
                 }
             }
 
+            Logger.info(`Resolved download filename for ${itemKey}: ${filename}`);
+
             chrome.runtime.sendMessage({
                 type: 'DOWNLOAD_ITEM',
                 payload: {
@@ -139,6 +204,7 @@ function injectDownloadButtons(itemKey) {
                 }
             }, (response) => {
                 if (response && response.success) {
+                    Logger.info(`Download request succeeded for ${itemKey}`, response);
                     btn.innerText = 'Downloaded';
                     // Optional: remove button after success? User said "downloaded button still exists"
                     // "切到其他条目两个按钮重合" -> fixed by removeExistingButtons
@@ -151,7 +217,7 @@ function injectDownloadButtons(itemKey) {
                 } else {
                     const err = response ? response.error : 'Unknown error';
                     btn.innerText = 'Error';
-                    Logger.error(err);
+                    Logger.error(`Download request failed for ${itemKey}: ${err}`);
                     alert('Download failed: ' + err);
                     setTimeout(() => {
                         btn.innerText = 'Download from WebDAV';
@@ -162,7 +228,10 @@ function injectDownloadButtons(itemKey) {
         };
 
         container.appendChild(btn);
+    } else {
+        Logger.error(`Unable to inject button for ${itemKey}: document.body is unavailable`);
     }
 }
 
 init();
+initializeDebugLogging();
