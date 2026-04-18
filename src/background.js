@@ -111,7 +111,7 @@ async function handleDownload(item) {
     });
 
     try {
-        await chrome.downloads.download({
+        return await chrome.downloads.download({
             url: base64data,
             filename: filename,
             saveAs: true
