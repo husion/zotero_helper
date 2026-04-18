@@ -34,10 +34,16 @@ export class WebDAVClient {
     async get(path) {
         const fullUrl = this.url + path;
         Logger.info(`WebDAV GET: ${fullUrl}`);
-        const response = await fetch(fullUrl, {
-            method: 'GET',
-            headers: this.getAuthHeader()
-        });
+
+        let response;
+        try {
+            response = await fetch(fullUrl, {
+                method: 'GET',
+                headers: this.getAuthHeader()
+            });
+        } catch (error) {
+            throw new Error(`WebDAV request blocked or unreachable for ${fullUrl}: ${error.message}`);
+        }
 
         if (!response.ok) {
             throw new Error(`WebDAV GET failed: ${response.status} ${response.statusText}`);
