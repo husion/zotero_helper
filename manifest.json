@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Zotero WebDAV Helper",
-  "version": "1.0.0",
-  "description": "Unlock WebDAV attachments in Zotero Web Library",
+  "name": "Zotero WebDAV Downloader",
+  "version": "1.1.0",
+  "description": "Download Zotero web attachments directly from your WebDAV storage.",
   "permissions": [
     "storage",
     "downloads"
@@ -15,6 +15,14 @@
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
+  },
+  "action": {
+    "default_title": "Zotero WebDAV Downloader",
+    "default_icon": {
+      "16": "src/icons/icon16.png",
+      "32": "src/icons/icon32.png",
+      "48": "src/icons/icon48.png"
+    }
   },
   "content_scripts": [
     {
@@ -32,6 +40,8 @@
     "open_in_tab": true
   },
   "icons": {
+    "16": "src/icons/icon16.png",
+    "32": "src/icons/icon32.png",
     "48": "src/icons/icon48.png",
     "128": "src/icons/icon128.png"
   }
